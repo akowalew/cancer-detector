@@ -139,39 +139,37 @@ class MLP(object):
 
 			outputsList = self.forwardPropagation(inputs)
 			errors = self.backwardPropagation(inputs, expectedOutputs, outputsList, learningRate)
+
+			# calculate MSE
 			errorsSum += (errors ** 2)
 			
-		mse = errorsSum / len(inputsdata)
-		return mse
+		totalError = errorsSum / len(inputsdata)
+		return totalError
 
 	# performs full training process, approaching goal or number of epochs
-	def train(self, inputsdata, targetsdata, goal, epochs, learningRate, monit):
+	def train(self, inputsdata, targetsdata, goal, epochs, learningRate, monitf=None):
 		inputsdata = np.array(inputsdata, copy=False)
 		targetsdata = np.array(targetsdata, copy=False)
 
-		elapsedToMonit = monit
-		for i in range(epochs):
+		for epoch in range(1, epochs):
 			# shuffle training set
 			p = np.random.permutation(len(inputsdata))
 			inputsdata = inputsdata[p]
 			targetsdata = targetsdata[p]
 
 			# perform single train
-			mse = self.singleTrain(inputsdata, targetsdata, learningRate)
-			if(mse < goal):
+			error = self.singleTrain(inputsdata, targetsdata, learningRate)
+			if monitf != None:
+				monitf(epoch, error)
+
+			if(error < goal):
 				break
 
-			elapsedToMonit -= 1
-			if(elapsedToMonit == 0):
-				print "Epoch: ", i+1," MSE: ", mse
-				elapsedToMonit = monit
-
-		print "Finished training in: ",i+1
-		return mse
+		return error
 
 	# Simulates net's work. Calculates outputs for last layer.
 	# Same as forwardPropagation, but without creating outputsList
 	def simulate(self, inputs):
 		inputs = self.scaleInputs(inputs)
-		outputsList = forwardPropagation(inputs)
+		outputs = self.forwardPropagation(inputs)
 		return outputs[-1]

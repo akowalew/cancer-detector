@@ -24,83 +24,91 @@ def readDataset(filename):
 
 	# read first row and initialize lists and minmax
 	firstRow = next(reader)
-	outputsList = [readOutputs(firstRow)]
-	inputsList = [readInputs(firstRow)]
+	outputsdata = [readOutputs(firstRow)]
+	inputsdata = [readInputs(firstRow)]
 
-	inputsMinMax = [[value, value] for value in inputsList[0]]
-	outputsMinMax = [[0.0, 1.0]]
+	# output is binary, arleady known
+	outputssize = len(outputsdata[0])
+	outputsminima = [0.0]
+	outputsmaxima = [1.0]
+
+	inputssize = len(inputsdata[0])
+	inputsminima = [float('Inf')] * inputssize
+	inputsmaxima = [float('-Inf')] * inputssize
+
+	minimaf = np.vectorize(min)
+	maximaf = np.vectorize(max)
 
 	for row in reader:
 		inputs = readInputs(row)
 		outputs = readOutputs(row)
+		assert len(inputs) == inputssize
+		assert len(outputs) == outputssize
 
-		inputsList.append(inputs)
-		outputsList.append(outputs)
+		inputsdata.append(inputs)
+		outputsdata.append(outputs)
 
-		for i in range(len(inputs)):
-			value = inputs[i]
-			minmax = inputsMinMax[i]
-			minmax[0] = min(minmax[0], value)
-			minmax[1] = max(minmax[1], value)
-			inputsMinMax[i] = minmax
+		inputsminima = minimaf(inputsminima, inputs)
+		inputsmaxima = maximaf(inputsmaxima, inputs)
 
-	inputsList = np.array(inputsList)
-	outputsList = np.array(outputsList)
-
-	return inputsList, outputsList, inputsMinMax, outputsMinMax
+	inputsdata = np.array(inputsdata)
+	outputsdata = np.array(outputsdata)
+	return {
+		'inputsdata': inputsdata,
+		'outputsdata': outputsdata,
+		'minmax': {
+			'inputsmaxima': inputsmaxima,
+			'inputsminima': inputsminima,
+			'outputsminima': outputsminima,
+			'outputsmaxima': outputsmaxima
+		}
+	}
 
 
 class PNN(object):
-	def __init__(self, inputsMinMax, outputsMinMax, hidden):
-		self.inN = len(inputsMinMax)
-		self.outN = len(outputsMinMax)
-		self.hidden = hidden
+	def __init__(self, nin, nout, nhiddens = [], minmax = None, transfs = None):
+		self.nin = nin
+		self.nout = nout
+		self.nhiddens = nhiddens
+		self.initializeWeights()	
 
-		self.activateFunction = np.vectorize(self.sigmoid)
-		self.initializeWeights()
-		self.initializeMinMax(inputsMinMax, outputsMinMax)
+		self.nlayers = len(nhiddens) + 1 # hidden layers plus output layer
+		if transfs == None:
+			self.transfs = [PNN.sigmoid] * self.nlayers
+		else:
+			assert len(transfs) == nlayers
+			self.transfs = transfs
 
-	# initializes weights for both hidden and output layers
+		if minmax != None:
+			assert len(minmax['inputsminima']) == nin
+			assert len(minmax['inputsmaxima']) == nin
+			assert len(minmax['outputsminima']) == nout	
+			assert len(minmax['outputsmaxima']) == nout
+			ntotalhidden = sum(nhiddens)
+			self.outputsmin = -np.sqrt(ntotalhidden)
+			self.outputsmax = np.sqrt(ntotalhidden)
+		self.minmax = minmax
+
+		
+	# initializes weights for both nhiddens and output layers
 	def initializeWeights(self):
-		self.weightsList = []
+		weightsList = []
 
-		# initialize weights for hidden layers as random (-1, 1)
+		# initialize weights for each hidden layer as random (-1, 1)
 		minRand = -1
 		maxRand = 1
-		width = self.inN
-		for k in range(len(self.hidden)):
-			height = self.hidden[k]
+		width = self.nin
+		for nhidden in self.nhiddens:
+			height = nhidden
 			weights = np.random.uniform(minRand, maxRand, [height, width])
-			self.weightsList.append(weights)
+			weightsList.append(weights)
 			width = height
 
-		# initialize weights for output layers as zeros
-		height = self.outN
-		weights = np.zeros([height, width])
-		self.weightsList.append(weights)
+		# initialize weights for output layer as zeros
+		outputweights = np.zeros([self.nout, width])
+		weightsList.append(outputweights)
 
-	def initializeMinMax(self, inputsMinMax, outputsMinMax):
-		inputsFromMin = []
-		inputsFromMax = []
-		for minmax in inputsMinMax:
-			inputsFromMin.append(minmax[0])
-			inputsFromMax.append(minmax[1])
-		self.inputsFromMin = np.array(inputsFromMin)
-		self.inputsFromMax = np.array(inputsFromMax)
-
-		outputsFromMin = []
-		outputsFromMax = []
-		for minmax in outputsMinMax:
-			outputsFromMin.append(minmax[0])
-			outputsFromMax.append(minmax[1])
-		self.outputsFromMin = np.array(outputsFromMin)
-		self.outputsFromMax = np.array(outputsFromMax)
-
-		self.inputsToMin = -1
-		self.inputsToMax = 1
-		hiddenTotal = sum(self.hidden)
-		self.outputsToMin = -np.sqrt(hiddenTotal)
-		self.outputsToMax = np.sqrt(hiddenTotal)
+		self.weightsList = weightsList
 
 	# maps value from one range to another
 	@staticmethod
@@ -109,69 +117,61 @@ class PNN(object):
 
 	# maps inputs from dataset's range to network's range (-1, 1)
 	def scaleInputs(self, inputs):
+		assert self.minmax != None
 		return PNN.remap(
 			inputs, 
-			self.inputsFromMin, self.inputsFromMax,
-			self.inputsToMin, self.inputsToMax
+			self.minmax['inputsminima'], self.minmax['inputsmaxima'], 
+			-1, 1
 			)
 
 	# maps outputs from dataset's range to network's range (-sqrt(hn), sqrt(hn))
 	def scaleOutputs(self, outputs):
+		assert self.minmax != None
 		return PNN.remap(
 			outputs,
-			self.outputsFromMin, self.outputsFromMax,
-			self.outputsToMin, self.outputsToMax
+			self.minmax['outputsminima'], self.minmax['outputsmaxima'],
+			self.outputsmin, self.outputsmax
 			)
 
 	# calculates list of outputs for each layer
 	def forwardPropagation(self, inputs):
 		outputsList = []
-		for weights in self.weightsList:
+		for i in range(self.nlayers):
+			# sum all inputs multiplied by its weights
+			weights = self.weightsList[i]
 			summary = weights.dot(inputs.T)
-			outputs = self.activateFunction(summary.T)
+
+			# pass through activate function
+			transf = self.transfs[i]
+			outputs = transf(summary.T)
+
+			# save outputs and set current outputs as next inputs
 			outputsList.append(outputs)
 			inputs = outputs
 
+		# TODO: scale the last output!
+
 		return outputsList
 
-	# same as forwardPropagation, but without creating outputsList
-	# at the end, it scales outputs back to the dataset's range
-	def calculateOutputs(self, inputs):
-		inputs = self.scaleInputs(inputs)
-		for weights in self.weightsList:
-			summary = weights.dot(inputs.T)
-			outputs = self.activateFunction(summary.T)
-			inputs = outputs
-
-		return outputs
-
-	# activation function
-	def sigmoid(self, x):
-		return 1 / (1 + np.exp(-x))
-
-	# derivative of activation function
-	def calculateGradients(self, outputs):
-		# sigmoid gradient
-		return outputs * (1 - outputs)
-
 	def backwardPropagation(self, inputs, expectedOutputs, outputsList, learningRate):
-		# calculate deltas for output layers
-		currentOutputs = outputsList[-1]
-		errors = expectedOutputs - currentOutputs
+		# calculate errors for output layer
+		netOutputs = outputsList[-1]
+		errors = expectedOutputs - netOutputs
+		
+		# calculate deltas for each hidden layer 
+		# starting from the last hidden layer of the net
 		deltas = errors 
 		deltasList = [deltas]
-		
-		# calculate deltas for hidden layers
 		for weights in reversed(self.weightsList[1:]):
 			deltas = deltas.dot(weights)
 			deltasList.insert(0, deltas)
 
 		# update weights
-		for i in range(len(self.weightsList)):
+		for i in range(self.nlayers):
 			weights = self.weightsList[i]
 			deltas = deltasList[i]
-			outputs = np.array(outputsList[i])
-			gradients = self.calculateGradients(outputs)
+			outputs = outputsList[i]
+			gradients = PNN.calculateGradients(outputs)
 
 			derivative = deltas * gradients
 			weightsGrowth = learningRate * (derivative.T.dot(inputs))
@@ -185,12 +185,12 @@ class PNN(object):
 	# trains net once with whole inputs and expectedOutputs list
 	# at the end, calculates Mean Square Error of training process
 	def singleTrain(self, inputsList, expectedOutputsList, learningRate):
-		errorsSum = np.zeros([1, self.outN])
+		errorsSum = np.zeros([1, self.nout])
 		for k in range(len(inputsList)):
-			inputs = inputsList[k].reshape(1, self.inN)
+			inputs = inputsList[k].reshape(1, self.nin)
+			expectedOutputs = expectedOutputsList[k].reshape(1, self.nout)
+			
 			inputs = self.scaleInputs(inputs)
-
-			expectedOutputs = expectedOutputsList[k].reshape(1, self.outN)
 
 			outputsList = self.forwardPropagation(inputs)
 			errors = self.backwardPropagation(inputs, expectedOutputs, outputsList, learningRate)
@@ -201,13 +201,12 @@ class PNN(object):
 
 	# performs full training process, approaching goal or number of epochs
 	def train(self, inputsList, expectedOutputsList, goal, epochs, learningRate, monit):
-		# assert len(inputsList) == len(expectedOutputsList)
 		elapsedToMonit = monit
 		for i in range(epochs):
-			# shuffle training set
-			p = np.random.permutation(len(inputsList))
-			inputsList = inputsList[p]
-			expectedOutputsList = expectedOutputsList[p]
+			# # shuffle training set
+			# p = np.random.permutation(len(inputsList))
+			# inputsList = inputsList[p]
+			# expectedOutputsList = expectedOutputsList[p]
 
 			# perform single train
 			mse = self.singleTrain(inputsList, expectedOutputsList, learningRate)
@@ -222,17 +221,41 @@ class PNN(object):
 		print "Finished training in: ",i+1
 		return mse
 
-learningRate = 0.05
-goal = 0.001
-epochs = 2000
-hidden = [3]
-inputsList, outputsList, inputsMinMax, outputsMinMax = readDataset("data.csv")
+	# Simulates net's work. Calculates outputs for last layer.
+	# Same as forwardPropagation, but without creating outputsList
+	def simulate(self, inputs):
+		inputs = self.scaleInputs(inputs)
+		outputsList = forwardPropagation(inputs)
+		return outputs[-1]
 
-pnn = PNN(inputsMinMax, outputsMinMax, hidden)
+	# activation function
+	@staticmethod
+	def sigmoid(x):
+		return 1 / (1 + np.exp(-x))
+
+	# derivative of activation function
+	@staticmethod
+	def calculateGradients(outputs):
+		# sigmoid gradient
+		return outputs * (1 - outputs)
+
+# def kFoldTesting(dataset, k, testf):
+
+dataset = readDataset("data.csv")
+inputsdata = dataset['inputsdata']
+outputsdata = dataset['outputsdata']
+nin = len(inputsdata[0]) 
+nout = len(outputsdata[0])
+nhiddens = [5]
+minmax = dataset['minmax']
+pnn = PNN(nin, nout, nhiddens, minmax)
 
 # train net
-size = len(inputsList)
+learningRate = 0.01
+goal = 0.01
+epochs = 5000
+size = len(inputsdata)
 errors =  pnn.train(
-	inputsList[0:size/2], outputsList[0:size/2], 
+	inputsdata[0:size/8], outputsdata[0:size/8], 
 	goal, epochs, learningRate, 10
 	)

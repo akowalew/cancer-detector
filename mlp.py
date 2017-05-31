@@ -1,20 +1,16 @@
 import trans
 
 import numpy as np
+from train import GdBackpropagationTrainer
 
 # MLP - Multi-Layer-Perceptron
 class MLP(object):
-	def __init__(self, nin, nout, nhiddens, inputs_min, inputs_max, transfs = None):
+	def __init__(self, nin, nout, nhiddens, inputs_min, inputs_max):
 		self.nin = nin
 		self.nout = nout
 		self.nhiddens = nhiddens
 
 		self.nlayers = len(nhiddens) + 1 # hidden layers plus output layer
-		if transfs == None:
-			self.transfs = [trans.LogSig()] * self.nlayers
-		else:
-			assert len(transfs) == self.nlayers
-			self.transfs = transfs
 
 		self.inputs_min = np.array(inputs_min)
 		self.inputs_max = np.array(inputs_max)
@@ -28,6 +24,10 @@ class MLP(object):
 		# ntotalhidden = sum(nhiddens)
 		# self.outputsmin = -np.sqrt(ntotalhidden)
 		# self.outputsmax = np.sqrt(ntotalhidden)
+
+		self.transfs = [trans.LogSig()] * self.nlayers
+
+		self.trainf = GdBackpropagationTrainer()
 
 		self.init()
 
@@ -69,13 +69,16 @@ class MLP(object):
 			-1, 1
 			)
 
-	# # maps outputs from dataset's range to network's range (-sqrt(hn), sqrt(hn))
-	# def scaleOutputs(self, outputs):
-	# 	return MLP.remap(
-	# 		outputs,
-	# 		self.outputs_min, self.outputs_max,
-	# 		self.outputsmin, self.outputsmax
-	# 		)
+	# maps outputs from dataset's range to network's range (-sqrt(hn), sqrt(hn))
+	def scaleOutputs(self, outputs):
+		return MLP.remap(
+			outputs,
+			self.outputs_min, self.outputs_max,
+			self.outputsmin, self.outputsmax
+			)
+
+	def train(self, *args, **kwargs):
+		return self.trainf(self, *args, **kwargs)
 
 	# calculates list of outputs for each layer
 	def forwardPropagation(self, inputs):
@@ -93,83 +96,12 @@ class MLP(object):
 			outputsList.append(outputs)
 			inputs = outputs
 
-		# TODO: scale the last output!
-
 		return outputsList
-
-	def backwardPropagation(self, inputs, expectedOutputs, outputsList, learningRate):
-		# calculate errors for output layer
-		netOutputs = outputsList[-1]
-		errors = expectedOutputs - netOutputs
-		
-		# calculate deltas for each hidden layer 
-		# starting from the last hidden layer of the net
-		deltas = errors 
-		deltasList = [deltas]
-		for weights in reversed(self.weightsList[1:]):
-			deltas = deltas.dot(weights)
-			deltasList.insert(0, deltas)
-
-		# update weights
-		for i in range(self.nlayers):
-			weights = self.weightsList[i]
-			deltas = deltasList[i]
-			outputs = outputsList[i]
-			transf = self.transfs[i]
-			gradients = transf.gradient(outputs)
-
-			derivative = deltas * gradients
-			weightsGrowth = learningRate * (derivative.T.dot(inputs))
-			weights += weightsGrowth
-			self.weightsList[i] = weights
-
-			inputs = outputs
-
-		return errors
-
-	# trains net once with whole inputs and expectedOutputs list
-	# at the end, calculates Mean Square Error of training process
-	def singleTrain(self, inputsdata, targetsdata, learningRate):
-		errorsSum = np.zeros([1, self.nout])
-		for k in range(len(inputsdata)):
-			inputs = inputsdata[k].reshape(1, self.nin)
-			expectedOutputs = targetsdata[k].reshape(1, self.nout)
-
-			inputs = self.scaleInputs(inputs)
-
-			outputsList = self.forwardPropagation(inputs)
-			errors = self.backwardPropagation(inputs, expectedOutputs, outputsList, learningRate)
-
-			# calculate MSE
-			errorsSum += (errors ** 2)
-			
-		totalError = errorsSum / len(inputsdata)
-		return totalError
-
-	# performs full training process, approaching goal or number of epochs
-	def train(self, inputsdata, targetsdata, goal, epochs, learningRate, monitf=None):
-		inputsdata = np.array(inputsdata, copy=False)
-		targetsdata = np.array(targetsdata, copy=False)
-
-		for epoch in range(1, epochs):
-			# shuffle training set
-			p = np.random.permutation(len(inputsdata))
-			inputsdata = inputsdata[p]
-			targetsdata = targetsdata[p]
-
-			# perform single train
-			error = self.singleTrain(inputsdata, targetsdata, learningRate)
-			if monitf != None:
-				monitf(epoch, error)
-
-			if(error < goal):
-				break
-
-		return error
 
 	# Simulates net's work. Calculates outputs for last layer.
 	# Same as forwardPropagation, but without creating outputsList
 	def simulate(self, inputs):
 		inputs = self.scaleInputs(inputs)
 		outputs = self.forwardPropagation(inputs)
+		# TODO: scale outputs if needed
 		return outputs[-1]

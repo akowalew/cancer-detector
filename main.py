@@ -60,7 +60,7 @@ class NetTester(object):
 		epochs = 5001
 		def monitf(epoch, error):
 			if (epoch % 100) == 0:
-				print("Epoch no#", epoch, "error = ", error)
+				print("Epoch no#{0}, error = {1}".format(epoch, error))
 
 		self.net.train(train_inputs, train_targets, goal, epochs, learningRate, monitf)
 
@@ -107,10 +107,10 @@ nhiddens = [5]
 inputs_min = min(inputs)
 inputs_max = max(inputs)
 nlayers = len(nhiddens) + 1
-transfs = [trans.LogSig()] * nlayers
-mlp = MLP(nin, nout, nhiddens, inputs_min, inputs_max, transfs)
+mlp = MLP(nin, nout, nhiddens, inputs_min, inputs_max)
+# mlp.transfs = [trans.LogSig()] * nlayers
 
-netTester = NetTester(mlp)
 k = 8
+netTester = NetTester(mlp)
 mean = kFoldValidation(inputs, targets, k, netTester)
 print("Mean error:", mean)

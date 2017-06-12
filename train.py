@@ -16,7 +16,7 @@ class GdBackpropagationTrainer(TrainerBase):
 	def __call__(self, net, inputsdata, targetsdata, goal, epochs, learn_rate, monitf=None):
 		inputsdata = np.array(inputsdata, copy=False)
 		targetsdata = np.array(targetsdata, copy=False)
-
+		
 		for epoch in range(1, epochs):
 			# shuffle training set
 			p = np.random.permutation(len(inputsdata))
@@ -25,6 +25,7 @@ class GdBackpropagationTrainer(TrainerBase):
 
 			# perform single train
 			error = self.singleTrain(net, inputsdata, targetsdata, learn_rate)
+
 			if monitf != None:
 				monitf(epoch, error)
 
@@ -49,12 +50,18 @@ class GdBackpropagationTrainer(TrainerBase):
 			
 		# Mean Square Error
 		error = errorsSum / len(inputsdata)
-		return error
+		return error[0][0]
 
 	def backwardPropagation(self, net, inputs, targets, outputsList, learn_rate):
 		# calculate errors for output layer
 		netOutputs = outputsList[-1]
 		errors = targets - netOutputs
+		
+		#print("Net output:", netOutputs, "Target", targets)
+		#print("")
+		#print('')
+		#input("")
+		
 		
 		# calculate deltas for each hidden layer 
 		# starting from the last hidden layer of the net
